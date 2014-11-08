@@ -8,16 +8,18 @@ Custom bauds already work on Windows.
 
 ## Compiling
 ### Requirements:
-gcc
+gcc  
 autoconf (and some other auto stuff which is normally installed along with autoconf)  
-libtoolize  
+libtoolize
+
 `apt-get install gcc autoconf libtool`
 
 ### Optional extras (with a guess at what they do):
 `libelf` - Support for uploading .elf files  
 `libusb` - Support for programmers that use libUSB like USBasp  
 `libftdi1` - Support for special functions of FTDI chips (not needed if you're only using the serial function)  
-`libhid` - Support for programmers that use some kind of HID thing  
+`libhid` - Support for programmers that use some kind of HID thing
+
 `apt-get install libelf libusb libftdi1 libhid`
 
 NOTE: `libftdi1` might be called `libftdi`
