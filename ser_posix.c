@@ -31,7 +31,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
-#include <sys/ioctl.h>
+//#include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/time.h>
 #include <sys/socket.h>
@@ -39,115 +39,76 @@
 #include <netinet/in.h>
 
 #include <fcntl.h>
-#include <termios.h>
+//#include <termios.h>
 #include <unistd.h>
 
 #include "avrdude.h"
 #include "libavrdude.h"
 
+#include <stropts.h>
+#include <asm/termios.h>
+
 long serial_recv_timeout = 5000; /* ms */
 
-struct baud_mapping {
-  long baud;
-  speed_t speed;
-};
-
-/* There are a lot more baud rates we could handle, but what's the point? */
-
-static struct baud_mapping baud_lookup_table [] = {
-  { 1200,   B1200 },
-  { 2400,   B2400 },
-  { 4800,   B4800 },
-  { 9600,   B9600 },
-  { 19200,  B19200 },
-  { 38400,  B38400 },
-#ifdef B57600
-  { 57600,  B57600 },
-#endif
-#ifdef B115200
-  { 115200, B115200 },
-#endif
-#ifdef B230400
-  { 230400, B230400 },
-#endif
-  { 0,      0 }                 /* Terminator. */
-};
-
-static struct termios original_termios;
+static struct termios2 original_termios;
 static int saved_original_termios;
-
-static speed_t serial_baud_lookup(long baud)
-{
-  struct baud_mapping *map = baud_lookup_table;
-
-  while (map->baud) {
-    if (map->baud == baud)
-      return map->speed;
-    map++;
-  }
-
-  /*
-   * If a non-standard BAUD rate is used, issue
-   * a warning (if we are verbose) and return the raw rate
-   */
-  avrdude_message(MSG_NOTICE, "%s: serial_baud_lookup(): Using non-standard baud rate: %ld",
-              progname, baud);
-
-  return baud;
-}
 
 static int ser_setspeed(union filedescriptor *fd, long baud)
 {
-  int rc;
-  struct termios termios;
-  speed_t speed = serial_baud_lookup (baud);
-  
-  if (!isatty(fd->ifd))
-    return -ENOTTY;
-  
-  /*
-   * initialize terminal modes
-   */
-  rc = tcgetattr(fd->ifd, &termios);
-  if (rc < 0) {
-    avrdude_message(MSG_INFO, "%s: ser_setspeed(): tcgetattr() failed",
-            progname);
-    return -errno;
-  }
+	int rc;
+	struct termios2 tio;
 
-  /*
-   * copy termios for ser_close if we haven't already
-   */
-  if (! saved_original_termios++) {
-    original_termios = termios;
-  }
+	if (!isatty(fd->ifd))
+		return -ENOTTY;
 
-  termios.c_iflag = IGNBRK;
-  termios.c_oflag = 0;
-  termios.c_lflag = 0;
-  termios.c_cflag = (CS8 | CREAD | CLOCAL);
-  termios.c_cc[VMIN]  = 1;
-  termios.c_cc[VTIME] = 0;
+	/*
+	* initialize terminal modes
+	*/
+	rc = ioctl(fd->ifd, TCGETS2, &tio);
+	if (rc < 0)
+	{
+		avrdude_message(MSG_INFO, "%s: ser_setspeed(): ioctl() TCGETS2 failed",
+			progname);
+		return -errno;
+	}
 
-  cfsetospeed(&termios, speed);
-  cfsetispeed(&termios, speed);
+	/*
+	* copy termios for ser_close if we haven't already
+	*/
+	if (! saved_original_termios++)
+		original_termios = tio;
 
-  rc = tcsetattr(fd->ifd, TCSANOW, &termios);
-  if (rc < 0) {
-    avrdude_message(MSG_INFO, "%s: ser_setspeed(): tcsetattr() failed\n",
-            progname);
-    return -errno;
-  }
+	tio.c_iflag = IGNBRK;
+	tio.c_oflag = 0;
+	tio.c_lflag = 0;
 
-  /*
-   * Everything is now set up for a local line without modem control
-   * or flow control, so clear O_NONBLOCK again.
-   */
-  rc = fcntl(fd->ifd, F_GETFL, 0);
-  if (rc != -1)
-    fcntl(fd->ifd, F_SETFL, rc & ~O_NONBLOCK);
+	tio.c_cflag &= ~CBAUD;
+	tio.c_cflag |= (BOTHER | CS8 | CREAD | CLOCAL);
 
-  return 0;
+	tio.c_cc[VMIN]  = 1;
+	tio.c_cc[VTIME] = 0;
+
+	tio.c_ispeed = baud;
+	tio.c_ospeed = baud;
+
+	//rc = tcsetattr(fd->ifd, TCSANOW, &termios);
+	rc = ioctl(fd->ifd, TCSETS2, &tio); // TCSANOW
+	if (rc < 0)
+	{
+		avrdude_message(MSG_INFO, "%s: ser_setspeed(): ioctl() TCSETS2 failed\n",
+			progname);
+		return -errno;
+	}
+
+	/*
+	* Everything is now set up for a local line without modem control
+	* or flow control, so clear O_NONBLOCK again.
+	*/
+	rc = fcntl(fd->ifd, F_GETFL, 0);
+	if (rc != -1)
+		fcntl(fd->ifd, F_SETFL, rc & ~O_NONBLOCK);
+
+	return 0;
 }
 
 /*
@@ -268,6 +229,8 @@ static int ser_open(char * port, union pinfo pinfo, union filedescriptor *fdp)
   /*
    * open the serial port
    */
+   // Sometimes this times out
+   // TODO: add a retry thing
   fd = open(port, O_RDWR | O_NOCTTY | O_NONBLOCK);
   if (fd < 0) {
     avrdude_message(MSG_INFO, "%s: ser_open(): can't open device \"%s\": %s\n",
@@ -297,7 +260,8 @@ static void ser_close(union filedescriptor *fd)
    * restore original termios settings from ser_open
    */
   if (saved_original_termios) {
-    int rc = tcsetattr(fd->ifd, TCSANOW | TCSADRAIN, &original_termios);
+	//int rc = tcsetattr(fd->ifd, TCSANOW | TCSADRAIN, &original_termios);
+	int rc = ioctl(fd->ifd, TCSETS2 | TCSETSW2, &original_termios); // TCSANOW | TCSADRAIN
     if (rc) {
       avrdude_message(MSG_INFO, "%s: ser_close(): can't reset attributes for device: %s\n",
                       progname, strerror(errno));
