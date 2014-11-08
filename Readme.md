@@ -3,8 +3,10 @@ AVRDUDE
 
 http://savannah.nongnu.org/projects/avrdude
 
-AVRDUDE with some modifications for custom non-standard baud rates on Linux (as long as the hardware supports it).    
-Custom bauds already work on Windows.
+AVRDUDE with some modifications for custom non-standard baud rates on Linux (as long as the hardware supports it).  
+Slight issue though - bytes start being dropped if they're not read fast enough, even if they're only being sent in chunks of 128. Stay below 230400 baud. If you really want super fast uploading then you'll have to disable verification (-V).
+
+Custom bauds already work on Windows and has no problems with fast baud rates. 
 
 ## Compiling
 ### Requirements:
